@@ -3,8 +3,8 @@ pandas
 numpy
 plotly
 scikit-learn
-fpdf2
-openpyxl
-requests
 shapely
-pyproj
+scipy
+folium
+streamlit-folium
+matplotlib
