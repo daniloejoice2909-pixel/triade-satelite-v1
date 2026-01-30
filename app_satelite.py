@@ -1,5 +1,5 @@
 import streamlit as st
-import pandas as pd  # <--- Corrigido aqui
+import pandas as pd
 import numpy as np
 import json
 import os
@@ -13,9 +13,9 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
 # --- 1. CONFIGURAÇÃO DE ALTA FIDELIDADE ---
-st.set_page_config(layout="wide", page_title="Tríade Satélite Pro v7.2")
+st.set_page_config(layout="wide", page_title="Tríade Satélite Pro v7.3")
 
-# Paleta Profissional FieldView (7 Níveis de Vigor)
+# Paleta Profissional FieldView (7 Níveis de Vigor - Cores Sólidas)
 fieldview_colors = ['#a50026', '#d73027', '#f46d43', '#fee08b', '#d9ef8b', '#66bd63', '#1a9850']
 
 if "logado" not in st.session_state:
@@ -54,8 +54,9 @@ else:
         f_geo = st.file_uploader("Contorno Berneck (.json)", type=['geojson', 'json'])
         tipo_mapa = st.selectbox("Camada Técnica:", ["NDVI (Vigor)", "NDRE (Nitrogênio)", "Brilho do Solo", "Imagem Real"])
         
-        suavidade = st.slider("Homogeneidade (Padrão OneSoil)", 1.0, 5.0, 3.5)
-        opacidade = st.slider("Transparência (%)", 0, 100, 70) / 100
+        # Ajustei o padrão para 2.0 para começar mais nítido
+        suavidade = st.slider("Homogeneidade (Ajuste de Manchas)", 1.0, 5.0, 2.0)
+        opacidade = st.slider("Transparência (%)", 0, 100, 75) / 100
         
         st.divider()
         d_ini = st.date_input("Início", value=pd.to_datetime("2025-01-01"))
@@ -81,6 +82,7 @@ else:
 
         if st.session_state.data_ativa:
             try:
+                # Geometria
                 geojson_data = json.load(f_geo)
                 geom_data = geojson_data['features'][0] if 'features' in geojson_data else geojson_data
                 geom = shape(geom_data['geometry'])
@@ -91,47 +93,64 @@ else:
                 area_m2 = geom.area * (111139**2) * np.cos(np.radians(geom.centroid.y))
                 area_total_ha = round(abs(area_m2) / 10000, 2)
 
-                # Motor de Vetorização
-                res = 200
-                x, y = np.linspace(minx, maxx, res), np.linspace(miny, maxy, res)
+                # --- MOTOR DE VETORIZAÇÃO CORRIGIDO ---
+                res = 250 # Resolução para vetores
+                # Cria o grid de coordenadas geográficas reais
+                x = np.linspace(minx, maxx, res)
+                y = np.linspace(miny, maxy, res)
                 X, Y = np.meshgrid(x, y)
                 
+                # Gera os dados (Simulação baseada na data)
                 np.random.seed(int(pd.to_datetime(st.session_state.data_ativa, dayfirst=True).timestamp() % 10000))
                 raw = np.random.uniform(0.3, 0.9, (res, res))
+                
+                # Aplica suavização
                 matrix = scipy.ndimage.gaussian_filter(raw, sigma=suavidade)
                 
+                # Normaliza (Contraste dinâmico)
                 v_min, v_max = np.nanpercentile(matrix, [5, 95])
                 matrix = np.clip((matrix - v_min) / (v_max - v_min), 0, 1)
 
-                tab1, tab2 = st.tabs(["🛰️ Monitoramento de Zonas", "📊 Relatório Técnico"])
+                # === A CORREÇÃO CRUCIAL ===
+                # Inverte a matriz verticalmente para alinhar o topo dos dados
+                # com o topo geográfico (Norte/Latitude Máxima)
+                matrix = np.flipud(matrix)
+                # ==========================
+
+                tab1, tab2 = st.tabs(["🛰️ Monitoramento de Zonas (Vetores)", "📊 Relatório Técnico"])
 
                 with tab1:
                     m = folium.Map(location=centroid, zoom_start=15, tiles=None)
+                    # Fundo Esri Clarity (Mais nítido)
                     folium.TileLayer(
                         tiles='https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
                         attr='Esri Clarity', name='Satélite HD'
                     ).add_to(m)
 
                     if "Real" not in tipo_mapa:
+                        # Gera os contornos vetoriais com a matriz agora alinhada
                         fig_c, ax_c = plt.subplots()
+                        # O contourf agora recebe os dados na orientação correta
                         contornos = ax_c.contourf(X, Y, matrix, levels=7)
                         plt.close(fig_c)
 
+                        # Desenha os polígonos no mapa
                         for level_idx, path_collection in enumerate(contornos.get_paths()):
                             v = path_collection.vertices
                             if len(v) > 3:
                                 folium.Polygon(
-                                    locations=v[:, [1, 0]].tolist(),
+                                    locations=v[:, [1, 0]].tolist(), # [lon, lat] -> [lat, lon]
                                     color=fieldview_colors[level_idx],
                                     fill=True, fill_color=fieldview_colors[level_idx],
                                     fill_opacity=opacidade, weight=0
                                 ).add_to(m)
                     
+                    # Contorno do Talhão
                     folium.GeoJson(geojson_data, style_function=lambda x: {'fillColor': 'none', 'color': 'yellow', 'weight': 2.5}).add_to(m)
                     folium_static(m, width=1100, height=750)
 
                 with tab2:
-                    st.header("📋 Distribuição de Área por Zona")
+                    st.header("📋 Distribuição Estimada de Área")
                     c1, c2, c3 = st.columns(3)
                     with c1: st.metric("Zona Alta (Verde)", f"{round(area_total_ha * 0.42, 2)} ha")
                     with c2: st.metric("Zona Média (Amarela)", f"{round(area_total_ha * 0.38, 2)} ha")
