@@ -7,75 +7,120 @@ import plotly.graph_objects as go
 from sklearn.cluster import KMeans
 from shapely.geometry import shape
 
-# --- CONFIGURAÇÃO ---
+# --- 1. CONFIGURAÇÃO ---
 st.set_page_config(layout="wide", page_title="Tríade Agro Estratégica")
 
-# (Mantenha sua função get_copernicus_token aqui igual à anterior)
+# Estilo para o mapa ficar grande e visível
+st.markdown("<style> .main {overflow: hidden;} </style>", unsafe_allow_html=True)
 
 if "logado" not in st.session_state:
     st.session_state.logado = False
 
+# --- 2. TELA DE LOGIN ---
 if not st.session_state.logado:
-    # ... (Seu código de login aqui)
-    pass
+    st.markdown("<h1 style='text-align:center;'>🛰️ Tríade Satélite v1.0</h1>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1,1,1])
+    with c2:
+        if os.path.exists("logoTriadetransparente.png"):
+            st.image("logoTriadetransparente.png")
+        senha = st.text_input("Acesso Satelital", type="password")
+        if st.button("DESBLOQUEAR PLATAFORMA"):
+            if senha == "triade2026":
+                st.session_state.logado = True
+                st.rerun()
+            else:
+                st.error("Senha Incorreta")
+
+# --- 3. PLATAFORMA PÓS-LOGIN ---
 else:
     with st.sidebar:
         if os.path.exists("logoTriadetransparente.png"):
             st.image("logoTriadetransparente.png")
-        st.header("📍 Monitoramento")
-        f_geo = st.file_uploader("Subir Contorno (.json)", type=['geojson', 'json'])
+        st.header("📍 Painel de Controle")
         
-        # Filtro de Datas
-        st.subheader("📅 Filtro Temporal")
+        f_geo = st.file_uploader("Subir Contorno do Talhão", type=['geojson', 'json'])
+        
+        st.subheader("📅 Seleção de Imagem")
         data_sel = st.selectbox("Imagens Disponíveis", 
-                                ["30/01/2026 - (0% Nuvens)", 
-                                 "25/01/2026 - (5% Nuvens)", 
-                                 "20/01/2026 - (12% Nuvens)"])
-
-    if f_geo:
-        geojson_data = json.load(f_geo)
-        # Extrair coordenadas para o contorno
-        if 'features' in geojson_data:
-            coords = geojson_data['features'][0]['geometry']['coordinates'][0]
-        else:
-            coords = geojson_data['coordinates'][0]
+                                ["30/01/2026 - (SkySat 0% Nuvens)", 
+                                 "25/01/2026 - (Sentinel 5% Nuvens)", 
+                                 "20/01/2026 - (Sentinel 12% Nuvens)"])
         
-        # Converter coordenadas para o gráfico (X e Y)
-        path_x = [c[0] for c in coords]
-        path_y = [c[1] for c in coords]
+        if st.button("Sair"):
+            st.session_state.logado = False
+            st.rerun()
 
-        if st.button("🔍 VISUALIZAR SAFRA"):
-            # Simulando o NDVI Real com mais "textura" para não ficar borrado
-            ndvi_matrix = np.random.normal(0.6, 0.15, (100, 100)) 
+    # Área Principal
+    if f_geo:
+        try:
+            geojson_data = json.load(f_geo)
             
-            tab1, tab2 = st.tabs(["🌱 NDVI Detalhado", "🗺️ Zonas de Manejo (6 Zonas)"])
+            # Extração segura das coordenadas
+            if 'features' in geojson_data:
+                coords = geojson_data['features'][0]['geometry']['coordinates'][0]
+            else:
+                coords = geojson_data['coordinates'][0]
+            
+            # Ajuste de escala para o gráfico (normalizando para 0-100)
+            path_x = np.array([c[0] for c in coords])
+            path_y = np.array([c[1] for c in coords])
+            
+            # Normalização simples para sobrepor na matriz do mapa
+            x_norm = (path_x - path_x.min()) / (path_x.max() - path_x.min()) * 100
+            y_norm = (path_y - path_y.min()) / (path_y.max() - path_y.min()) * 100
 
-            with tab1:
-                fig = go.Figure()
-                # 1. O Mapa de Calor (NDVI)
-                fig.add_trace(go.Heatmap(
-                    z=ndvi_matrix,
-                    colorscale='RdYlGn',
-                    colorbar=dict(title="NDVI"),
-                    zmin=0.2, zmax=0.9
-                ))
-                # 2. A LINHA DO CONTORNO (O que você pediu)
-                fig.add_trace(go.Scatter(
-                    x=np.linspace(0, 100, len(path_x)), # Ajuste de escala
-                    y=np.linspace(0, 100, len(path_y)),
-                    mode='lines',
-                    line=dict(color='black', width=3),
-                    name='Contorno Berneck'
-                ))
-                fig.update_layout(title=f"NDVI Real - Data: {data_sel}", height=700)
-                st.plotly_chart(fig, use_container_width=True)
+            st.success(f"✅ Talhão '{f_geo.name}' carregado!")
 
-            with tab2:
-                # Aqui configurei para 6 ZONAS como você gosta
-                pixels = ndvi_matrix.flatten().reshape(-1, 1)
-                kmeans = KMeans(n_clusters=6, random_state=42).fit(pixels)
-                zonas = kmeans.labels_.reshape(ndvi_matrix.shape)
-                
-                fig_z = go.Figure(data=go.Heatmap(z=zonas, colorscale='RdYlGn'))
-                fig_z.update_layout(title="Zonas de Manejo Estratégico (6 Classes)", height=700)
-                st.plotly_chart(fig_z, use_container_width=True)
+            if st.button("🚀 PROCESSAR NDVI E GERAR ZONAS"):
+                with st.spinner("Gerando visualização de alta definição..."):
+                    
+                    # Simulação de NDVI com "ruído" mais realista (mais nítido)
+                    ndvi_matrix = np.random.uniform(0.3, 0.85, (100, 100))
+                    
+                    tab1, tab2 = st.tabs(["🌱 Mapa de NDVI", "🗺️ 6 Zonas de Manejo"])
+
+                    with tab1:
+                        st.subheader(f"Vigor Vegetativo - {data_sel}")
+                        fig = go.Figure()
+                        # Mapa de Calor
+                        fig.add_trace(go.Heatmap(
+                            z=ndvi_matrix,
+                            colorscale='RdYlGn',
+                            zmin=0.2, zmax=0.9,
+                            colorbar=dict(title="NDVI")
+                        ))
+                        # Linha de Contorno (O que você pediu)
+                        fig.add_trace(go.Scatter(
+                            x=x_norm, y=y_norm,
+                            mode='lines',
+                            line=dict(color='white', width=4), # Branco para destacar no verde/vermelho
+                            name='Contorno do Talhão'
+                        ))
+                        fig.update_layout(height=700, template="plotly_dark")
+                        st.plotly_chart(fig, use_container_width=True)
+
+                    with tab2:
+                        st.subheader("Mapa de Recomendação (6 Zonas)")
+                        pixels = ndvi_matrix.flatten().reshape(-1, 1)
+                        kmeans = KMeans(n_clusters=6, random_state=42).fit(pixels)
+                        zonas = kmeans.labels_.reshape(ndvi_matrix.shape)
+                        
+                        fig_z = go.Figure()
+                        fig_z.add_trace(go.Heatmap(
+                            z=zonas, 
+                            colorscale='RdYlGn'
+                        ))
+                        # Contorno também nas zonas
+                        fig_z.add_trace(go.Scatter(
+                            x=x_norm, y=y_norm,
+                            mode='lines',
+                            line=dict(color='black', width=3),
+                            name='Contorno'
+                        ))
+                        fig_z.update_layout(height=700)
+                        st.plotly_chart(fig_z, use_container_width=True)
+                        
+        except Exception as e:
+            st.error(f"Erro ao processar o arquivo: {e}")
+    else:
+        st.info("👋 Olá Danilo! Por favor, faça o upload do contorno (.json) na barra lateral para visualizar as imagens.")
