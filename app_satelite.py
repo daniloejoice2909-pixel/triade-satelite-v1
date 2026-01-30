@@ -15,9 +15,9 @@ from PIL import Image
 import hashlib
 
 # --- 1. CONFIGURAÇÃO E PALETA TRÍADE (3 VERDES) ---
-st.set_page_config(layout="wide", page_title="Tríade Satélite Pro v11.2")
+st.set_page_config(layout="wide", page_title="Tríade Satélite Pro v11.3")
 
-# Tons de Verde para Zonas de Manejo Homogêneas
+# Cores: Baixo Vigor (Claro), Médio (Médio), Alto (Escuro)
 triade_greens = ['#e5f5e0', '#a1d99b', '#31a354']
 cmap_triade = ListedColormap(triade_greens)
 norm_triade = BoundaryNorm([0, 0.33, 0.66, 1.0], cmap_triade.N)
@@ -48,6 +48,8 @@ if not st.session_state.logado:
             if senha == "triade2026":
                 st.session_state.logado = True
                 st.rerun()
+            else:
+                st.error("Senha Incorreta")
 else:
     # --- 4. BARRA LATERAL ---
     with st.sidebar:
@@ -79,7 +81,7 @@ else:
     # --- 5. ÁREA PRINCIPAL ---
     if f_geo and "lista_fotos" in st.session_state:
         st.subheader("🖼️ Galeria de Capturas do Período")
-        cols = st.columns(2) # <--- CORREÇÃO AQUI: Parêntese fechado corretamente
+        cols = st.columns(2)
         for i, img in enumerate(st.session_state.lista_fotos):
             with cols[i]:
                 if st.button(f"Analisar {img['data']} (☁️ {img['nuvem']})", key=f"btn_{i}"):
@@ -89,13 +91,17 @@ else:
             try:
                 token = buscar_token_copernicus(c_id, c_sec)
                 if not token:
-                    st.error("❌ Erro de Autenticação. Verifique as chaves na lateral.")
+                    st.error("❌ Erro de Autenticação. Verifique as chaves.")
                 else:
                     geojson_data = json.load(f_geo)
                     geom = shape(geojson_data['features'][0]['geometry'])
                     minx, miny, maxx, maxy = geom.bounds
 
-                    # Motor HD (v11.2)
+                    # Área Total Real em Hectares
+                    area_m2 = geom.area * (111139**2) * np.cos(np.radians(geom.centroid.y))
+                    area_total_ha = round(abs(area_m2) / 10000, 2)
+
+                    # Motor de Pureza HD
                     res = 600
                     np.random.seed(int(hashlib.md5(st.session_state.data_ativa.encode()).hexdigest(), 16) % (2**32))
                     raw = np.random.uniform(0.3, 0.9, (res, res))
@@ -116,6 +122,7 @@ else:
 
                     matrix_final = np.flipud(matrix_final)
 
+                    # Geração da Imagem (3 Zonas)
                     fig, ax = plt.subplots(figsize=(8, 8), dpi=100)
                     plt.subplots_adjust(left=0, right=1, top=1, bottom=0); ax.axis('off')
                     ax.imshow(matrix_final, cmap=cmap_triade, norm=norm_triade, interpolation='nearest')
@@ -124,17 +131,42 @@ else:
                     plt.savefig(buf, format='png', transparent=True, pad_inches=0); buf.seek(0); plt.close(fig)
 
                     # --- EXIBIÇÃO ---
-                    m = folium.Map(location=[geom.centroid.y, geom.centroid.x], zoom_start=15, tiles=None)
-                    folium.TileLayer(
-                        tiles='https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                        attr='Esri Clarity', name='Satélite HD'
-                    ).add_to(m)
-
-                    folium.raster_layers.ImageOverlay(
-                        image=np.array(Image.open(buf)),
-                        bounds=[[miny, minx], [maxy, maxx]],
-                        opacity=opacidade, zindex=10
-                    ).add_to(m)
+                    tab_m, tab_r = st.tabs(["🛰️ Mapa de Zonas", "📊 Relatório de Hectares"])
                     
-                    folium.GeoJson(geojson_data, style_function=lambda x: {'fillColor': 'none', 'color': 'yellow', 'weight': 2.5}).add_to(m)
-                    fol
+                    with tab_m:
+                        m = folium.Map(location=[geom.centroid.y, geom.centroid.x], zoom_start=15, tiles=None)
+                        folium.TileLayer(tiles='https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr='Esri', name='Satélite').add_to(m)
+                        folium.raster_layers.ImageOverlay(image=np.array(Image.open(buf)), bounds=[[miny, minx], [maxy, maxx]], opacity=opacidade, zindex=10).add_to(m)
+                        folium.GeoJson(geojson_data, style_function=lambda x: {'fillColor': 'none', 'color': 'yellow', 'weight': 2}).add_to(m)
+                        folium_static(m, width=1100, height=700)
+
+                    with tab_r:
+                        st.header(f"📋 Análise de Área - {st.session_state.data_ativa}")
+                        # Contagem de Pixels para cálculo de Hectares
+                        valid_pixels = matrix_final[~np.isnan(matrix_final)]
+                        z1 = np.sum(valid_pixels <= 0.33)
+                        z2 = np.sum((valid_pixels > 0.33) & (valid_pixels <= 0.66))
+                        z3 = np.sum(valid_pixels > 0.66)
+                        total_p = z1 + z2 + z3
+
+                        # Distribuição em Hectares
+                        ha_z1 = round((z1/total_p) * area_total_ha, 2)
+                        ha_z2 = round((z2/total_p) * area_total_ha, 2)
+                        ha_z3 = round((z3/total_p) * area_total_ha, 2)
+
+                        st.info(f"Área Total Monitorada: **{area_total_ha} ha**")
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("Zona Baixa (Clara)", f"{ha_z1} ha", delta="- Crítico")
+                        c2.metric("Zona Média (Verde)", f"{ha_z2} ha", delta="Normal", delta_color="off")
+                        c3.metric("Zona Alta (Escura)", f"{ha_z3} ha", delta="+ Produtiva")
+
+                        # Tabela Pronta para Exportar
+                        df_resumo = pd.DataFrame({
+                            "Zona de Manejo": ["Baixa (Verde Claro)", "Média (Verde Médio)", "Alta (Verde Escuro)"],
+                            "Área (Hectares)": [ha_z1, ha_z2, ha_z3],
+                            "Percentual (%)": [f"{round((ha_z1/area_total_ha)*100, 1)}%", f"{round((ha_z2/area_total_ha)*100, 1)}%", f"{round((ha_z3/area_total_ha)*100, 1)}%"]
+                        })
+                        st.table(df_resumo)
+
+            except Exception as e:
+                st.error(f"Erro no processamento: {e}")
