@@ -82,4 +82,4 @@ if f_geo:
     except Exception as e:
         st.error(f"Erro ao processar arquivo: {e}")
 else:
-    st.info("Por favor, faça o upload do arquivo GeoJSON para começar.")
+    f_geo = st.file_uploader("Subir Contorno do Talhão", type=['geojson', 'json'])
