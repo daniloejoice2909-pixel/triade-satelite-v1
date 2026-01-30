@@ -7,12 +7,12 @@ import requests
 import plotly.graph_objects as go
 from sklearn.cluster import KMeans
 from shapely.geometry import shape, Point
-import scipy.ndimage  # Para suavizar o mapa e tirar o quadriculado
+import scipy.ndimage 
 
 # --- 1. CONFIGURAÇÃO INICIAL ---
 st.set_page_config(layout="wide", page_title="Tríade Agro Estratégica")
 
-# Paleta Profissional Vibrante
+# Paleta Profissional Vibrante para NDVI
 agri_vibrante = [
     [0.0, 'rgb(215,48,39)'],   # Vermelho (Solo/Estresse)
     [0.2, 'rgb(252,141,89)'],  # Laranja
@@ -49,8 +49,9 @@ else:
         f_geo = st.file_uploader("Contorno do Talhão (.json)", type=['geojson', 'json'])
         
         st.divider()
-        st.date_input("Data Inicial", value=pd.to_datetime("2026-01-01"))
-        st.date_input("Data Final", value=pd.to_datetime("2026-01-30"))
+        st.subheader("📅 Período de Busca")
+        d_ini = st.date_input("Data Inicial", value=pd.to_datetime("2024-01-01"))
+        d_fim = st.date_input("Data Final", value=pd.to_datetime("2026-01-30"))
         
         if st.button("Sair"):
             st.session_state.logado = False
@@ -67,36 +68,41 @@ else:
             minx, miny, maxx, maxy = geom.bounds
             path_coords = list(geom.exterior.coords) if hasattr(geom, 'exterior') else list(geom[0].exterior.coords)
 
-            # --- GALERIA DE MINIATURAS ---
-            st.subheader("🖼️ Galeria de Imagens Disponíveis")
-            m1, m2, m3 = st.columns(3)
-            datas_disponiveis = ["30/01/2026", "22/01/2026", "15/01/2026"]
+            # --- GALERIA DE DATAS ---
+            st.subheader(f"🖼️ Imagens Disponíveis no Período")
+            data_topo = d_fim.strftime("%d/%m/%Y")
+            data_meio = (d_ini + (d_fim - d_ini)/2).strftime("%d/%m/%Y")
+            data_base = d_ini.strftime("%d/%m/%Y")
+            lista_datas = [data_topo, data_meio, data_base]
             
             if "data_ativa" not in st.session_state:
-                st.session_state.data_ativa = datas_disponiveis[0]
+                st.session_state.data_ativa = lista_datas[0]
 
+            m1, m2, m3 = st.columns(3)
             for i, col in enumerate([m1, m2, m3]):
                 with col:
-                    if st.button(f"📅 {datas_disponiveis[i]}", key=f"btn_{i}"):
-                        st.session_state.data_ativa = datas_disponiveis[i]
+                    if st.button(f"📅 {lista_datas[i]}", key=f"btn_{i}"):
+                        st.session_state.data_ativa = lista_datas[i]
 
             st.divider()
 
-            # --- GERAÇÃO DO MAPA ---
-            res = 120 
+            # --- PROCESSAMENTO ---
+            res = 130 
             x = np.linspace(minx, maxx, res)
             y = np.linspace(miny, maxy, res)
-            X, Y = np.meshgrid(x, y) # LINHA CORRIGIDA AQUI
+            X, Y = np.meshgrid(x, y)
             
+            # Geração de NDVI Suavizado
+            np.random.seed(int(pd.to_datetime(st.session_state.data_ativa, dayfirst=True).timestamp() % 1000))
             raw_ndvi = np.random.uniform(0.3, 0.9, (res, res))
-            ndvi_matrix = scipy.ndimage.gaussian_filter(raw_ndvi, sigma=2.5)
+            ndvi_matrix = scipy.ndimage.gaussian_filter(raw_ndvi, sigma=3.0)
             
             for i in range(res):
                 for j in range(res):
                     if not geom.contains(Point(x[j], y[i])):
                         ndvi_matrix[i, j] = np.nan
 
-            tab1, tab2 = st.tabs(["🌱 NDVI Profissional", "🗺️ Zonas de Manejo (6 Zonas)"])
+            tab1, tab2 = st.tabs(["🌱 NDVI Profissional", "🗺️ Zonas de Manejo (3 Classes)"])
 
             with tab1:
                 st.subheader(f"Mapa de Vigor - {st.session_state.data_ativa}")
@@ -111,21 +117,37 @@ else:
                 ))
                 fig.add_trace(go.Scatter(
                     x=[c[0] for c in path_coords], y=[c[1] for c in path_coords],
-                    mode='lines', line=dict(color='yellow', width=3), name='Limite'
+                    mode='lines', line=dict(color='yellow', width=3), name='Contorno'
                 ))
                 fig.update_yaxes(scaleanchor="x", scaleratio=1)
                 fig.update_layout(height=750, template="plotly_dark")
                 st.plotly_chart(fig, use_container_width=True)
 
             with tab2:
-                st.subheader("Classificação em 6 Zonas")
-                valid_data = ndvi_matrix[~np.isnan(ndvi_matrix)].reshape(-1, 1)
-                kmeans = KMeans(n_clusters=6, random_state=42).fit(valid_data)
+                st.subheader("Divisão em 3 Zonas de Produtividade")
+                valid_pixels = ndvi_matrix[~np.isnan(ndvi_matrix)].reshape(-1, 1)
+                
+                # ALTERADO PARA 3 ZONAS
+                kmeans = KMeans(n_clusters=3, random_state=42).fit(valid_pixels)
+                
+                # Organizar labels para garantir que a maior média seja sempre a zona 2 (Verde)
+                order = np.argsort(kmeans.cluster_centers_.sum(axis=1))
+                rank = np.zeros_like(kmeans.labels_)
+                for i, o in enumerate(order):
+                    rank[kmeans.labels_ == o] = i
+                
                 zonas_map = np.full(ndvi_matrix.shape, np.nan)
-                zonas_map[~np.isnan(ndvi_matrix)] = kmeans.labels_
+                zonas_map[~np.isnan(ndvi_matrix)] = rank
 
                 fig_z = go.Figure()
-                fig_z.add_trace(go.Heatmap(x=x, y=y, z=zonas_map, colorscale='RdYlGn'))
+                fig_z.add_trace(go.Heatmap(
+                    x=x, y=y, z=zonas_map, 
+                    colorscale='RdYlGn', # Vermelho(0), Amarelo(1), Verde(2)
+                    colorbar=dict(
+                        tickvals=[0, 1, 2],
+                        ticktext=['Baixa', 'Média', 'Alta']
+                    )
+                ))
                 fig_z.add_trace(go.Scatter(
                     x=[c[0] for c in path_coords], y=[c[1] for c in path_coords],
                     mode='lines', line=dict(color='black', width=2)
@@ -133,6 +155,10 @@ else:
                 fig_z.update_yaxes(scaleanchor="x", scaleratio=1)
                 fig_z.update_layout(height=750)
                 st.plotly_chart(fig_z, use_container_width=True)
+                
+                st.info("💡 **Legenda:** Vermelho = Baixa Produtividade | Amarelo = Média Produtividade | Verde = Alta Produtividade")
 
         except Exception as e:
             st.error(f"Erro no processamento: {e}")
+    else:
+        st.info("👋 Danilo, selecione o histórico e suba o contorno para gerar as 3 zonas de manejo.")
