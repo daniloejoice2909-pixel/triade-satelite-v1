@@ -4,20 +4,23 @@ import numpy as np
 import json
 import os
 import folium
+import requests
 from streamlit_folium import folium_static
 from shapely.geometry import shape, Point
 import scipy.ndimage
 import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
+from matplotlib.colors import ListedColormap, BoundaryNorm
 import io
 from PIL import Image
 
 # --- 1. CONFIGURAÇÃO DE ALTA FIDELIDADE ---
-st.set_page_config(layout="wide", page_title="Tríade Satélite Pro v8.0")
+st.set_page_config(layout="wide", page_title="Tríade Satélite Pro v9.0")
 
-# Paleta OneSoil/FieldView (7 Níveis de Vigor) - Cores Vivas
+# Paleta OneSoil/FieldView (7 Níveis de Vigor - Cores Sólidas)
 fieldview_colors = ['#a50026', '#d73027', '#f46d43', '#fee08b', '#d9ef8b', '#66bd63', '#1a9850']
+# Criamos um normalizador para garantir que as cores sejam blocos sólidos
 cmap_pro = ListedColormap(fieldview_colors)
+norm_pro = BoundaryNorm(np.linspace(0, 1, 8), cmap_pro.N)
 
 if "logado" not in st.session_state:
     st.session_state.logado = False
@@ -55,8 +58,8 @@ else:
         f_geo = st.file_uploader("Upload Contorno Berneck (.json)", type=['geojson', 'json'])
         tipo_mapa = st.selectbox("Índice Técnico:", ["NDVI (Vigor)", "NDRE (Nitrogênio)", "Brilho do Solo", "Imagem Real"])
         
-        # O segredo da nitidez: Resolução e Suavização controlada
-        suavidade = st.slider("Homogeneidade (Zonas)", 0.5, 4.0, 1.2)
+        # AJUSTE CRUCIAL: Aumentei a escala de suavização para criar zonas grandes
+        suavidade = st.slider("Homogeneidade (Tamanho das Zonas)", 5.0, 25.0, 15.0)
         opacidade = st.slider("Transparência da Camada (%)", 0, 100, 75) / 100
         
         st.divider()
@@ -93,43 +96,52 @@ else:
                 area_m2 = geom.area * (111139**2) * np.cos(np.radians(geom.centroid.y))
                 area_ha = round(abs(area_m2) / 10000, 2)
 
-                # --- 4.2 MOTOR DE RENDERIZAÇÃO ULTRA-HD (O FIM DO BORRÃO) ---
-                res = 400 # Alta resolução para evitar quadriculados
+                # --- 4.2 MOTOR DE ZONAS SÓLIDAS (TCHAU ONÇA PINTADA) ---
+                res = 800 # Resolução Altíssima para definição de borda
                 np.random.seed(int(pd.to_datetime(st.session_state.data_ativa, dayfirst=True).timestamp() % 10000))
                 
                 # Gerando a matriz base
-                raw = np.random.uniform(0.3, 0.9, (res, res))
+                raw = np.random.uniform(0.2, 0.8, (res, res))
                 
-                # Suavização Gaussiana para Zonas Homogêneas
-                matrix = scipy.ndimage.gaussian_filter(raw, sigma=suavidade)
+                # 1. Suavização Pesada (Cria as grandes manchas)
+                matrix_smooth = scipy.ndimage.gaussian_filter(raw, sigma=suavidade)
                 
-                # CORREÇÃO DEFINITIVA: 
-                # Usamos origin='lower' no mapeamento para alinhar Sul com Sul e Norte com Norte
-                v_min, v_max = np.nanpercentile(matrix, [5, 95])
-                matrix_norm = np.clip((matrix - v_min) / (v_max - v_min), 0, 1)
+                # 2. Normalização (Estica o contraste)
+                v_min, v_max = np.nanpercentile(matrix_smooth, [2, 98])
+                matrix_norm = np.clip((matrix_smooth - v_min) / (v_max - v_min), 0, 1)
 
-                # Criando a imagem final com máscara de contorno
-                fig, ax = plt.subplots(figsize=(6, 6), dpi=150)
+                # 3. MÁSCARA DE RECORTE (TCHAU QUADRADO)
+                # Cria o grid de coordenadas reais
+                lats = np.linspace(miny, maxy, res)
+                lons = np.linspace(minx, maxx, res)
+                matrix_final = np.full((res, res), np.nan) # Começa tudo vazio (transparente)
+
+                # Verifica ponto a ponto se está dentro do talhão
+                for i in range(res):
+                    for j in range(res):
+                        # i=0 é a latitude mínima (Sul). 
+                        if geom.contains(Point(lons[j], lats[i])):
+                            matrix_final[i, j] = matrix_norm[i, j]
+
+                # 4. CORREÇÃO DE ORIENTAÇÃO FINAL
+                # Como a matriz foi montada de baixo (miny) para cima (maxy),
+                # precisamos inverter para que o plot (que começa de cima) fique correto.
+                matrix_final = np.flipud(matrix_final)
+
+                # Geração da Imagem Técnica Sólida
+                fig, ax = plt.subplots(figsize=(8, 8), dpi=100)
                 plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
                 ax.axis('off')
-
-                # Aplicando a máscara no nível da imagem para não "vazar" cores borradas
-                # Criamos um grid para verificar se cada pixel está dentro do talhão
-                y_coords = np.linspace(miny, maxy, res)
-                x_coords = np.linspace(minx, maxx, res)
+                # Usamos 'nearest' para garantir blocos sólidos de cor, sem degradê borrado
+                ax.imshow(matrix_final, cmap=cmap_pro, norm=norm_pro, interpolation='nearest')
                 
-                # Renderizando a imagem técnica com a orientação correta
-                # origin='lower' garante que a linha 0 da matriz seja o Sul do mapa
-                im = ax.imshow(matrix_norm, cmap=cmap_pro, interpolation='bilinear', origin='lower', extent=[minx, maxx, miny, maxy])
-
-                # Salva a imagem em memória para sobreposição no Folium
                 buf = io.BytesIO()
                 plt.savefig(buf, format='png', transparent=True, pad_inches=0)
                 buf.seek(0)
                 plt.close(fig)
 
                 # --- 4.3 EXIBIÇÃO ---
-                tab1, tab2 = st.tabs(["🛰️ Monitoramento de Precisão", "📊 Relatório de Hectares"])
+                tab1, tab2 = st.tabs(["🛰️ Monitoramento de Zonas Sólidas", "📊 Relatório de Hectares"])
 
                 with tab1:
                     m = folium.Map(location=centroid, zoom_start=15, tiles=None)
@@ -140,7 +152,7 @@ else:
                     ).add_to(m)
 
                     if "Real" not in tipo_mapa:
-                        # Sobreposição da Imagem Processada
+                        # Sobreposição da Imagem Recortada e Sólida
                         folium.raster_layers.ImageOverlay(
                             image=np.array(Image.open(buf)),
                             bounds=[[miny, minx], [maxy, maxx]],
