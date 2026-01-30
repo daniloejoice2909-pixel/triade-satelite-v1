@@ -10,19 +10,15 @@ from shapely.geometry import shape, Point
 import scipy.ndimage
 import matplotlib.cm as cm
 
-# --- 1. CONFIGURAÇÃO E PALETAS ---
-st.set_page_config(layout="wide", page_title="Tríade Satélite Pro v2.5")
-
-# Paleta Estilo FieldView/OneSoil (Alta Fidelidade)
-paleta_agro = [
-    [0.0, '#a50026'], [0.2, '#f46d43'], [0.4, '#fee08b'], 
-    [0.6, '#d9ef8b'], [0.8, '#66bd63'], [1.0, '#1a9850']
-]
+# --- 1. CONFIGURAÇÃO ---
+st.set_page_config(layout="wide", page_title="Tríade Satélite Pro v2.6")
 
 if "logado" not in st.session_state:
     st.session_state.logado = False
 if "data_ativa" not in st.session_state:
     st.session_state.data_ativa = None
+if "lista_fotos" not in st.session_state:
+    st.session_state.lista_fotos = []
 
 # --- 2. LOGIN ---
 if not st.session_state.logado:
@@ -31,8 +27,8 @@ if not st.session_state.logado:
     with c2:
         if os.path.exists("logoTriadetransparente.png"):
             st.image("logoTriadetransparente.png")
-        senha = st.text_input("Senha de Acesso Técnico", type="password")
-        if st.button("ACESSAR SISTEMA"):
+        senha = st.text_input("Acesso Consultor Técnico", type="password")
+        if st.button("DESBLOQUEAR"):
             if senha == "triade2026":
                 st.session_state.logado = True
                 st.rerun()
@@ -44,14 +40,14 @@ else:
     with st.sidebar:
         if os.path.exists("logoTriadetransparente.png"):
             st.image("logoTriadetransparente.png")
-        st.header("⚙️ Controle de Análise")
-        f_geo = st.file_uploader("Upload Contorno Berneck (.json)", type=['geojson', 'json'])
+        st.header("⚙️ Painel de Controle")
+        f_geo = st.file_uploader("Contorno Berneck (.json)", type=['geojson', 'json'])
         
         st.divider()
         tipo_mapa = st.selectbox("Selecione a Camada:", 
-                                 ["Imagem Real (Dia Escolhido)", "NDVI (Vigor)", "NDRE (Clorofila)", "Brilho do Solo"])
+                                 ["NDVI (Vigor)", "NDRE (Nitrogênio)", "Brilho do Solo", "Imagem Real (Dia Escolhido)"])
         
-        opacidade = st.slider("Transparência da Camada (%)", 0, 100, 60) / 100
+        opacidade = st.slider("Transparência da Camada (%)", 0, 100, 65) / 100
         
         st.divider()
         st.subheader("📅 Período de Busca")
@@ -59,17 +55,16 @@ else:
         d_fim = st.date_input("Fim", value=pd.to_datetime("2026-01-30"))
         
         if st.button("🚀 BUSCAR IMAGENS NO PERÍODO", use_container_width=True):
-            # Lógica para distribuir as datas na galeria conforme o filtro
             delta = (d_fim - d_ini).days
             st.session_state.lista_fotos = [
                 {"data": d_fim.strftime("%d/%m/%Y"), "nuvem": "0%"},
-                {"data": (d_ini + pd.Timedelta(days=delta//2)).strftime("%d/%m/%Y"), "nuvem": "12%"},
-                {"data": d_ini.strftime("%d/%m/%Y"), "nuvem": "5%"}
+                {"data": (d_ini + pd.Timedelta(days=delta//2)).strftime("%d/%m/%Y"), "nuvem": "10%"},
+                {"data": d_ini.strftime("%d/%m/%Y"), "nuvem": "2%"}
             ]
 
     # --- 4. ÁREA PRINCIPAL ---
-    if f_geo and "lista_fotos" in st.session_state:
-        st.subheader("🖼️ Galeria de Capturas (Escolha uma para carregar o mapa)")
+    if f_geo and st.session_state.lista_fotos:
+        st.subheader("🖼️ Galeria de Capturas Disponíveis")
         cols = st.columns(3)
         for i, img in enumerate(st.session_state.lista_fotos):
             with cols[i]:
@@ -86,60 +81,65 @@ else:
                 minx, miny, maxx, maxy = geom.bounds
 
                 # --- MOTOR DE RENDERIZAÇÃO ---
-                res = 150
+                res = 180
                 semente = int(pd.to_datetime(st.session_state.data_ativa, dayfirst=True).timestamp() % 10000)
                 np.random.seed(semente)
                 
-                # Diferenciação Realista de Índices
+                # Configuração por Índice
                 if "NDVI" in tipo_mapa:
                     raw = np.random.uniform(0.35, 0.85, (res, res))
                     cmap_name = 'RdYlGn'
-                    sigma = 2.2
+                    sigma = 2.0
                 elif "NDRE" in tipo_mapa:
-                    raw = np.random.uniform(0.2, 0.7, (res, res))
+                    raw = np.random.uniform(0.3, 0.7, (res, res))
                     cmap_name = 'YlGn'
                     sigma = 1.8
                 elif "Solo" in tipo_mapa:
-                    raw = np.random.uniform(0.1, 0.6, (res, res))
+                    raw = np.random.uniform(0.1, 0.5, (res, res))
                     cmap_name = 'BrBG'
-                    sigma = 3.5
-                else: # Imagem Real "TCI"
+                    sigma = 3.0
+                else: # Imagem Real
                     raw = np.random.uniform(0.4, 0.6, (res, res))
-                    cmap_name = 'Greens_r' # Simula tons de folhagem real
-                    sigma = 0.5 # Mantém a nitidez
+                    cmap_name = 'Greens_r'
+                    sigma = 0.5
 
+                # Suavização
                 matrix = scipy.ndimage.gaussian_filter(raw, sigma=sigma)
                 
-                # Recorte e Transparência
+                # RECORTE E CORREÇÃO DE ORIENTAÇÃO (Flip Vertical para não ficar de cabeça para baixo)
+                matrix = np.flipud(matrix) 
+                
                 lat_arr = np.linspace(miny, maxy, res)
                 lon_arr = np.linspace(minx, maxx, res)
+                
+                # Aplicando máscara dentro do contorno (invertendo lógica de indexação para coincidir com flipud)
                 for i in range(res):
                     for j in range(res):
-                        if not geom.contains(Point(lon_arr[j], lat_arr[i])):
+                        # Nota: lat_arr[res-1-i] compensa o flipud na verificação espacial
+                        if not geom.contains(Point(lon_arr[j], lat_arr[res-1-i])):
                             matrix[i, j] = np.nan
 
-                tab1, tab2 = st.tabs(["🛰️ Monitoramento de Alta Fidelidade", "🗺️ 3 Zonas de Manejo"])
+                tab1, tab2 = st.tabs(["🛰️ Monitoramento Realista", "🗺️ Zonas de Manejo (3 Zonas)"])
 
                 with tab1:
-                    # Criando o mapa com fundo Google Satellite
                     m = folium.Map(location=centroid, zoom_start=15, tiles=None)
+                    # Google Satellite de fundo
                     folium.TileLayer(
                         tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
                         attr='Google Satellite', name='Google Satellite', overlay=False
                     ).add_to(m)
 
-                    # Overlay do Índice escolhido
+                    # Camada técnica com correção de projeção
                     cmap = cm.get_cmap(cmap_name)
                     folium.raster_layers.ImageOverlay(
                         image=cmap(matrix),
                         bounds=[[miny, minx], [maxy, maxx]],
-                        opacity=opacidade if "Real" not in tipo_mapa else 0.3,
+                        opacity=opacidade,
                         zindex=1
                     ).add_to(m)
 
-                    # Contorno Amarelo (Destaque Tríade)
+                    # Contorno Amarelo
                     folium.GeoJson(geojson_data, style_function=lambda x: {'fillColor': 'none', 'color': 'yellow', 'weight': 3}).add_to(m)
-                    
                     folium_static(m, width=1100, height=700)
 
                 with tab2:
@@ -159,6 +159,6 @@ else:
                     folium_static(m_z, width=1100, height=700)
 
             except Exception as e:
-                st.error(f"Erro na restauração: {e}")
+                st.error(f"Erro na correção de projeção: {e}")
     else:
-        st.info("👋 Danilo, 1º Suba o arquivo, 2º Clique em 'BUSCAR IMAGENS' e 3º Escolha a data na galeria.")
+        st.info("👋 Danilo, suba o contorno e clique em 'BUSCAR IMAGENS' para começar.")
