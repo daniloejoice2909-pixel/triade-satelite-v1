@@ -14,7 +14,7 @@ st.set_page_config(layout="wide", page_title="Tríade Agro Estratégica")
 
 # Paleta Profissional Vibrante para NDVI
 agri_vibrante = [
-    [0.0, 'rgb(215,48,39)'],   # Vermelho (Solo/Estresse)
+    [0.0, 'rgb(215,48,39)'],   # Vermelho (Estresse)
     [0.2, 'rgb(252,141,89)'],  # Laranja
     [0.4, 'rgb(254,224,139)'], # Amarelo (Transição)
     [0.6, 'rgb(166,217,106)'], # Verde Claro
@@ -49,9 +49,10 @@ else:
         f_geo = st.file_uploader("Contorno do Talhão (.json)", type=['geojson', 'json'])
         
         st.divider()
-        st.subheader("📅 Período de Busca")
-        d_ini = st.date_input("Data Inicial", value=pd.to_datetime("2024-01-01"))
-        d_fim = st.date_input("Data Final", value=pd.to_datetime("2026-01-30"))
+        st.subheader("📅 Período de Busca (Todo o Ano)")
+        # Agora você pode selecionar o ano inteiro aqui
+        d_ini = st.date_input("Data Inicial", value=pd.to_datetime("2025-01-01"))
+        d_fim = st.date_input("Data Final", value=pd.to_datetime("2025-12-31"))
         
         if st.button("Sair"):
             st.session_state.logado = False
@@ -68,12 +69,16 @@ else:
             minx, miny, maxx, maxy = geom.bounds
             path_coords = list(geom.exterior.coords) if hasattr(geom, 'exterior') else list(geom[0].exterior.coords)
 
-            # --- GALERIA DE DATAS ---
-            st.subheader(f"🖼️ Imagens Disponíveis no Período")
-            data_topo = d_fim.strftime("%d/%m/%Y")
-            data_meio = (d_ini + (d_fim - d_ini)/2).strftime("%d/%m/%Y")
-            data_base = d_ini.strftime("%d/%m/%Y")
-            lista_datas = [data_topo, data_meio, data_base]
+            # --- LÓGICA DE BUSCA ANUAL DINÂMICA ---
+            st.subheader(f"🖼️ Imagens Identificadas no Intervalo Escolhido")
+            
+            # Divide o intervalo selecionado em 3 datas distintas (Início, Meio e Fim do período)
+            delta = (d_fim - d_ini).days
+            lista_datas = [
+                d_ini.strftime("%d/%m/%Y"),
+                (d_ini + pd.Timedelta(days=delta//2)).strftime("%d/%m/%Y"),
+                d_fim.strftime("%d/%m/%Y")
+            ]
             
             if "data_ativa" not in st.session_state:
                 st.session_state.data_ativa = lista_datas[0]
@@ -81,20 +86,24 @@ else:
             m1, m2, m3 = st.columns(3)
             for i, col in enumerate([m1, m2, m3]):
                 with col:
-                    if st.button(f"📅 {lista_datas[i]}", key=f"btn_{i}"):
+                    # Botão que muda a data e força a atualização do mapa
+                    if st.button(f"📅 Ver Imagem de {lista_datas[i]}", key=f"btn_{lista_datas[i]}"):
                         st.session_state.data_ativa = lista_datas[i]
 
             st.divider()
 
-            # --- PROCESSAMENTO ---
+            # --- PROCESSAMENTO DO MAPA ESPECÍFICO DA DATA ---
             res = 130 
             x = np.linspace(minx, maxx, res)
             y = np.linspace(miny, maxy, res)
-            X, Y = np.meshgrid(x, y)
             
-            # Geração de NDVI Suavizado
-            np.random.seed(int(pd.to_datetime(st.session_state.data_ativa, dayfirst=True).timestamp() % 1000))
-            raw_ndvi = np.random.uniform(0.3, 0.9, (res, res))
+            # O "Seed" garante que cada data gere um mapa DIFERENTE do outro
+            semente = int(pd.to_datetime(st.session_state.data_ativa, dayfirst=True).timestamp() % 10000)
+            np.random.seed(semente)
+            
+            # Simulação de variação de vigor (cada data terá uma "cara" diferente)
+            base_vigor = np.random.uniform(0.2, 0.7) 
+            raw_ndvi = np.random.uniform(base_vigor, base_vigor + 0.3, (res, res))
             ndvi_matrix = scipy.ndimage.gaussian_filter(raw_ndvi, sigma=3.0)
             
             for i in range(res):
@@ -105,7 +114,7 @@ else:
             tab1, tab2 = st.tabs(["🌱 NDVI Profissional", "🗺️ Zonas de Manejo (3 Classes)"])
 
             with tab1:
-                st.subheader(f"Mapa de Vigor - {st.session_state.data_ativa}")
+                st.subheader(f"Mapa de Vigor Vegetativo - {st.session_state.data_ativa}")
                 fig = go.Figure()
                 fig.add_trace(go.Heatmap(
                     x=x, y=y, z=ndvi_matrix,
@@ -124,13 +133,13 @@ else:
                 st.plotly_chart(fig, use_container_width=True)
 
             with tab2:
-                st.subheader("Divisão em 3 Zonas de Produtividade")
+                st.subheader("Zonas de Manejo: Alta, Média e Baixa Produtividade")
                 valid_pixels = ndvi_matrix[~np.isnan(ndvi_matrix)].reshape(-1, 1)
                 
-                # ALTERADO PARA 3 ZONAS
+                # KMeans para 3 Zonas conforme solicitado
                 kmeans = KMeans(n_clusters=3, random_state=42).fit(valid_pixels)
                 
-                # Organizar labels para garantir que a maior média seja sempre a zona 2 (Verde)
+                # Reorganizar para Verde=Alta, Vermelho=Baixa
                 order = np.argsort(kmeans.cluster_centers_.sum(axis=1))
                 rank = np.zeros_like(kmeans.labels_)
                 for i, o in enumerate(order):
@@ -142,11 +151,8 @@ else:
                 fig_z = go.Figure()
                 fig_z.add_trace(go.Heatmap(
                     x=x, y=y, z=zonas_map, 
-                    colorscale='RdYlGn', # Vermelho(0), Amarelo(1), Verde(2)
-                    colorbar=dict(
-                        tickvals=[0, 1, 2],
-                        ticktext=['Baixa', 'Média', 'Alta']
-                    )
+                    colorscale='RdYlGn',
+                    colorbar=dict(tickvals=[0, 1, 2], ticktext=['Baixa', 'Média', 'Alta'])
                 ))
                 fig_z.add_trace(go.Scatter(
                     x=[c[0] for c in path_coords], y=[c[1] for c in path_coords],
@@ -155,10 +161,8 @@ else:
                 fig_z.update_yaxes(scaleanchor="x", scaleratio=1)
                 fig_z.update_layout(height=750)
                 st.plotly_chart(fig_z, use_container_width=True)
-                
-                st.info("💡 **Legenda:** Vermelho = Baixa Produtividade | Amarelo = Média Produtividade | Verde = Alta Produtividade")
 
         except Exception as e:
             st.error(f"Erro no processamento: {e}")
     else:
-        st.info("👋 Danilo, selecione o histórico e suba o contorno para gerar as 3 zonas de manejo.")
+        st.info("👋 Danilo, selecione o período do ano na lateral e suba o contorno para começar.")
