@@ -5,3 +5,6 @@ plotly
 scikit-learn
 fpdf2
 openpyxl
+requests
+shapely
+pyproj
