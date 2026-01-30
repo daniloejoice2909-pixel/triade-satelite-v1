@@ -9,14 +9,25 @@ from sklearn.cluster import KMeans
 from shapely.geometry import shape, Point
 import scipy.ndimage
 import matplotlib.cm as cm
+from matplotlib.colors import ListedColormap, BoundaryNorm
 
-# --- 1. CONFIGURAÇÃO ---
-st.set_page_config(layout="wide", page_title="Tríade Satélite Pro v2.6")
+# --- 1. CONFIGURAÇÃO E PALETAS FIELDVIEW ---
+st.set_page_config(layout="wide", page_title="Tríade Satélite Pro v2.7")
+
+# Cores Exatas do FieldView (Do Vermelho Crítico ao Verde Escuro)
+fieldview_colors = [
+    '#d73027', # Baixíssimo
+    '#f46d43', # Baixo
+    '#fdae61', # Médio-Baixo
+    '#fee08b', # Médio (Transição)
+    '#d9ef8b', # Médio-Alto
+    '#66bd63', # Alto
+    '#1a9850'  # Altíssimo Vigor
+]
+cmap_fv = ListedColormap(fieldview_colors)
 
 if "logado" not in st.session_state:
     st.session_state.logado = False
-if "data_ativa" not in st.session_state:
-    st.session_state.data_ativa = None
 if "lista_fotos" not in st.session_state:
     st.session_state.lista_fotos = []
 
@@ -27,7 +38,7 @@ if not st.session_state.logado:
     with c2:
         if os.path.exists("logoTriadetransparente.png"):
             st.image("logoTriadetransparente.png")
-        senha = st.text_input("Acesso Consultor Técnico", type="password")
+        senha = st.text_input("Acesso Consultor", type="password")
         if st.button("DESBLOQUEAR"):
             if senha == "triade2026":
                 st.session_state.logado = True
@@ -40,26 +51,25 @@ else:
     with st.sidebar:
         if os.path.exists("logoTriadetransparente.png"):
             st.image("logoTriadetransparente.png")
-        st.header("⚙️ Painel de Controle")
+        st.header("⚙️ Painel de Precisão")
         f_geo = st.file_uploader("Contorno Berneck (.json)", type=['geojson', 'json'])
         
         st.divider()
-        tipo_mapa = st.selectbox("Selecione a Camada:", 
-                                 ["NDVI (Vigor)", "NDRE (Nitrogênio)", "Brilho do Solo", "Imagem Real (Dia Escolhido)"])
+        tipo_mapa = st.selectbox("Selecione o Índice Técnico:", 
+                                 ["NDVI (Vigor de Safra)", "NDRE (Nitrogênio)", "Brilho do Solo", "Imagem Real (Dia)"])
         
-        opacidade = st.slider("Transparência da Camada (%)", 0, 100, 65) / 100
+        opacidade = st.slider("Opacidade da Camada (%)", 0, 100, 75) / 100
         
         st.divider()
-        st.subheader("📅 Período de Busca")
         d_ini = st.date_input("Início", value=pd.to_datetime("2025-01-01"))
         d_fim = st.date_input("Fim", value=pd.to_datetime("2026-01-30"))
         
-        if st.button("🚀 BUSCAR IMAGENS NO PERÍODO", use_container_width=True):
+        if st.button("🚀 BUSCAR IMAGENS", use_container_width=True):
             delta = (d_fim - d_ini).days
             st.session_state.lista_fotos = [
                 {"data": d_fim.strftime("%d/%m/%Y"), "nuvem": "0%"},
-                {"data": (d_ini + pd.Timedelta(days=delta//2)).strftime("%d/%m/%Y"), "nuvem": "10%"},
-                {"data": d_ini.strftime("%d/%m/%Y"), "nuvem": "2%"}
+                {"data": (d_ini + pd.Timedelta(days=delta//2)).strftime("%d/%m/%Y"), "nuvem": "5%"},
+                {"data": d_ini.strftime("%d/%m/%Y"), "nuvem": "10%"}
             ]
 
     # --- 4. ÁREA PRINCIPAL ---
@@ -71,81 +81,64 @@ else:
                 if st.button(f"📅 {img['data']} (☁️ {img['nuvem']})", key=f"btn_{i}"):
                     st.session_state.data_ativa = img['data']
 
-        if st.session_state.data_ativa:
+        if "data_ativa" in st.session_state:
             try:
-                # Processamento Geográfico
                 geojson_data = json.load(f_geo)
                 geom_data = geojson_data['features'][0] if 'features' in geojson_data else geojson_data
                 geom = shape(geom_data['geometry'])
                 centroid = [geom.centroid.y, geom.centroid.x]
                 minx, miny, maxx, maxy = geom.bounds
 
-                # --- MOTOR DE RENDERIZAÇÃO ---
+                # --- MOTOR DE RENDERIZAÇÃO FIELDVIEW ---
                 res = 180
                 semente = int(pd.to_datetime(st.session_state.data_ativa, dayfirst=True).timestamp() % 10000)
                 np.random.seed(semente)
                 
-                # Configuração por Índice
-                if "NDVI" in tipo_mapa:
-                    raw = np.random.uniform(0.35, 0.85, (res, res))
-                    cmap_name = 'RdYlGn'
-                    sigma = 2.0
-                elif "NDRE" in tipo_mapa:
-                    raw = np.random.uniform(0.3, 0.7, (res, res))
-                    cmap_name = 'YlGn'
-                    sigma = 1.8
-                elif "Solo" in tipo_mapa:
-                    raw = np.random.uniform(0.1, 0.5, (res, res))
-                    cmap_name = 'BrBG'
-                    sigma = 3.0
-                else: # Imagem Real
-                    raw = np.random.uniform(0.4, 0.6, (res, res))
-                    cmap_name = 'Greens_r'
-                    sigma = 0.5
-
-                # Suavização
-                matrix = scipy.ndimage.gaussian_filter(raw, sigma=sigma)
+                # Gera dados base
+                raw = np.random.uniform(0.3, 0.9, (res, res))
+                matrix = scipy.ndimage.gaussian_filter(raw, sigma=2.0)
                 
-                # RECORTE E CORREÇÃO DE ORIENTAÇÃO (Flip Vertical para não ficar de cabeça para baixo)
+                # RECORTE E CORREÇÃO DE POSIÇÃO
                 matrix = np.flipud(matrix) 
-                
                 lat_arr = np.linspace(miny, maxy, res)
                 lon_arr = np.linspace(minx, maxx, res)
                 
-                # Aplicando máscara dentro do contorno (invertendo lógica de indexação para coincidir com flipud)
                 for i in range(res):
                     for j in range(res):
-                        # Nota: lat_arr[res-1-i] compensa o flipud na verificação espacial
                         if not geom.contains(Point(lon_arr[j], lat_arr[res-1-i])):
                             matrix[i, j] = np.nan
 
-                tab1, tab2 = st.tabs(["🛰️ Monitoramento Realista", "🗺️ Zonas de Manejo (3 Zonas)"])
+                # Normalização por Percentil (O segredo do FieldView para dar contraste)
+                valid_data = matrix[~np.isnan(matrix)]
+                if valid_data.size > 0:
+                    v_min, v_max = np.percentile(valid_data, [2, 98])
+                    matrix = np.clip((matrix - v_min) / (v_max - v_min), 0, 1)
+
+                tab1, tab2 = st.tabs(["🛰️ Monitoramento FieldView Style", "🗺️ 3 Zonas de Manejo"])
 
                 with tab1:
                     m = folium.Map(location=centroid, zoom_start=15, tiles=None)
-                    # Google Satellite de fundo
                     folium.TileLayer(
                         tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
                         attr='Google Satellite', name='Google Satellite', overlay=False
                     ).add_to(m)
 
-                    # Camada técnica com correção de projeção
-                    cmap = cm.get_cmap(cmap_name)
-                    folium.raster_layers.ImageOverlay(
-                        image=cmap(matrix),
-                        bounds=[[miny, minx], [maxy, maxx]],
-                        opacity=opacidade,
-                        zindex=1
-                    ).add_to(m)
+                    # Aplicando a Matriz de Cores Discretas (FieldView)
+                    if "Real" not in tipo_mapa:
+                        color_data = cmap_fv(matrix)
+                        folium.raster_layers.ImageOverlay(
+                            image=color_data,
+                            bounds=[[miny, minx], [maxy, maxx]],
+                            opacity=opacidade,
+                            zindex=1
+                        ).add_to(m)
 
-                    # Contorno Amarelo
                     folium.GeoJson(geojson_data, style_function=lambda x: {'fillColor': 'none', 'color': 'yellow', 'weight': 3}).add_to(m)
                     folium_static(m, width=1100, height=700)
 
                 with tab2:
-                    st.subheader("Divisão Estratégica: Alta, Média e Baixa")
-                    valid = matrix[~np.isnan(matrix)].reshape(-1, 1)
-                    kmeans = KMeans(n_clusters=3, n_init=10).fit(valid)
+                    st.subheader("Mapa de Prescrição - 3 Zonas")
+                    kmeans = KMeans(n_clusters=3, n_init=10).fit(valid_data.reshape(-1, 1))
                     order = np.argsort(kmeans.cluster_centers_.sum(axis=1))
                     rank = np.zeros_like(kmeans.labels_)
                     for k, o in enumerate(order): rank[kmeans.labels_ == o] = k
@@ -154,11 +147,9 @@ else:
                     zonas_map[~np.isnan(matrix)] = rank
                     
                     m_z = folium.Map(location=centroid, zoom_start=15, tiles=None)
-                    folium.TileLayer(tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', attr='Google', name='Google').add_to(m_z)
+                    folium.TileLayer(tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', attr='Google').add_to(m_z)
                     folium.raster_layers.ImageOverlay(image=cm.get_cmap('RdYlGn')(zonas_map/2.0), bounds=[[miny, minx], [maxy, maxx]], opacity=0.6).add_to(m_z)
                     folium_static(m_z, width=1100, height=700)
 
             except Exception as e:
-                st.error(f"Erro na correção de projeção: {e}")
-    else:
-        st.info("👋 Danilo, suba o contorno e clique em 'BUSCAR IMAGENS' para começar.")
+                st.error(f"Erro na renderização: {e}")
