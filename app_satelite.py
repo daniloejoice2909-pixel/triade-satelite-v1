@@ -12,7 +12,7 @@ import scipy.ndimage  # Para suavizar o mapa e tirar o quadriculado
 # --- 1. CONFIGURAÇÃO INICIAL ---
 st.set_page_config(layout="wide", page_title="Tríade Agro Estratégica")
 
-# Paleta Profissional Vibrante (Padrão de Mercado)
+# Paleta Profissional Vibrante
 agri_vibrante = [
     [0.0, 'rgb(215,48,39)'],   # Vermelho (Solo/Estresse)
     [0.2, 'rgb(252,141,89)'],  # Laranja
@@ -21,18 +21,6 @@ agri_vibrante = [
     [0.8, 'rgb(26,152,80)'],   # Verde
     [1.0, 'rgb(0,68,27)']      # Verde Escuro (Vigor Máximo)
 ]
-
-# Função de Autenticação Copernicus CDSE
-def get_copernicus_token():
-    try:
-        client_id = st.secrets["SH_CLIENT_ID"]
-        client_secret = st.secrets["SH_CLIENT_SECRET"]
-        url = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
-        data = {"grant_type": "client_credentials", "client_id": client_id, "client_secret": client_secret}
-        response = requests.post(url, data=data)
-        return response.json().get("access_token")
-    except:
-        return None
 
 if "logado" not in st.session_state:
     st.session_state.logado = False
@@ -71,7 +59,6 @@ else:
     if f_geo:
         try:
             geojson_data = json.load(f_geo)
-            # Processamento da Geometria
             if 'features' in geojson_data:
                 geom = shape(geojson_data['features'][0]['geometry'])
             else:
@@ -90,14 +77,62 @@ else:
 
             for i, col in enumerate([m1, m2, m3]):
                 with col:
-                    st.caption(f"Satélite: Sentinel-2")
                     if st.button(f"📅 {datas_disponiveis[i]}", key=f"btn_{i}"):
                         st.session_state.data_ativa = datas_disponiveis[i]
 
             st.divider()
 
-            # --- GERAÇÃO DO MAPA SUAVIZADO ---
-            res = 120 # Resolução da matriz
+            # --- GERAÇÃO DO MAPA ---
+            res = 120 
             x = np.linspace(minx, maxx, res)
             y = np.linspace(miny, maxy, res)
-            X, Y = np.meshgrid(x,
+            X, Y = np.meshgrid(x, y) # LINHA CORRIGIDA AQUI
+            
+            raw_ndvi = np.random.uniform(0.3, 0.9, (res, res))
+            ndvi_matrix = scipy.ndimage.gaussian_filter(raw_ndvi, sigma=2.5)
+            
+            for i in range(res):
+                for j in range(res):
+                    if not geom.contains(Point(x[j], y[i])):
+                        ndvi_matrix[i, j] = np.nan
+
+            tab1, tab2 = st.tabs(["🌱 NDVI Profissional", "🗺️ Zonas de Manejo (6 Zonas)"])
+
+            with tab1:
+                st.subheader(f"Mapa de Vigor - {st.session_state.data_ativa}")
+                fig = go.Figure()
+                fig.add_trace(go.Heatmap(
+                    x=x, y=y, z=ndvi_matrix,
+                    colorscale=agri_vibrante,
+                    zsmooth='best',
+                    zmin=np.nanmin(ndvi_matrix), zmax=np.nanmax(ndvi_matrix),
+                    colorbar=dict(title="NDVI"),
+                    connectgaps=False
+                ))
+                fig.add_trace(go.Scatter(
+                    x=[c[0] for c in path_coords], y=[c[1] for c in path_coords],
+                    mode='lines', line=dict(color='yellow', width=3), name='Limite'
+                ))
+                fig.update_yaxes(scaleanchor="x", scaleratio=1)
+                fig.update_layout(height=750, template="plotly_dark")
+                st.plotly_chart(fig, use_container_width=True)
+
+            with tab2:
+                st.subheader("Classificação em 6 Zonas")
+                valid_data = ndvi_matrix[~np.isnan(ndvi_matrix)].reshape(-1, 1)
+                kmeans = KMeans(n_clusters=6, random_state=42).fit(valid_data)
+                zonas_map = np.full(ndvi_matrix.shape, np.nan)
+                zonas_map[~np.isnan(ndvi_matrix)] = kmeans.labels_
+
+                fig_z = go.Figure()
+                fig_z.add_trace(go.Heatmap(x=x, y=y, z=zonas_map, colorscale='RdYlGn'))
+                fig_z.add_trace(go.Scatter(
+                    x=[c[0] for c in path_coords], y=[c[1] for c in path_coords],
+                    mode='lines', line=dict(color='black', width=2)
+                ))
+                fig_z.update_yaxes(scaleanchor="x", scaleratio=1)
+                fig_z.update_layout(height=750)
+                st.plotly_chart(fig_z, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Erro no processamento: {e}")
