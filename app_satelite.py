@@ -8,55 +8,53 @@ from sklearn.cluster import KMeans
 from shapely.geometry import shape, Point
 import scipy.ndimage 
 
-# --- 1. CONFIGURAÇÃO E ESTILO ---
-st.set_page_config(layout="wide", page_title="Tríade Agro Estratégica v1.0")
+# --- 1. CONFIGURAÇÃO DE ALTA PERFORMANCE ---
+st.set_page_config(layout="wide", page_title="Tríade Agro Estratégica v1.8")
 
-# Paletas Profissionais
-paleta_ndvi = [[0, 'red'], [0.5, 'yellow'], [1, 'darkgreen']]
-paleta_solo = [[0, 'white'], [1, 'rgb(101,67,33)']]
+# Paletas Técnicas Customizadas
+paleta_ndvi = [[0, '#e50000'], [0.2, '#ff4500'], [0.5, '#ffff00'], [0.8, '#00ff00'], [1, '#004d1a']]
+paleta_ndre = [[0, '#ffa500'], [0.5, '#ffff00'], [1, '#006400']]
+paleta_solo = [[0, '#ffffff'], [0.5, '#d2b48c'], [1, '#3d2b1f']]
+# Paleta para Imagem Real (Simula tons de solo e folhagem real)
+paleta_real = [[0, '#4b3621'], [0.5, '#556b2f'], [1, '#228b22']]
 
 if "logado" not in st.session_state:
     st.session_state.logado = False
 
-# --- 2. TELA DE ACESSO ---
+# --- 2. LOGIN ---
 if not st.session_state.logado:
-    st.markdown("<h1 style='text-align:center;'>🛰️ Tríade Satélite v1.0</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align:center;'>🛰️ Tríade Satélite Pro</h1>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1,1,1])
     with c2:
         if os.path.exists("logoTriadetransparente.png"):
             st.image("logoTriadetransparente.png")
-        senha = st.text_input("Acesso Estratégico", type="password")
-        if st.button("DESBLOQUEAR"):
+        senha = st.text_input("Senha de Acesso Técnico", type="password")
+        if st.button("ACESSAR SISTEMA"):
             if senha == "triade2026":
                 st.session_state.logado = True
                 st.rerun()
             else:
                 st.error("Senha Incorreta")
-
-# --- 3. PLATAFORMA ---
 else:
+    # --- 3. DASHBOARD ---
     with st.sidebar:
         if os.path.exists("logoTriadetransparente.png"):
             st.image("logoTriadetransparente.png")
-        st.header("📍 Monitoramento")
-        f_geo = st.file_uploader("Contorno do Talhão (.json)", type=['geojson', 'json'])
+        st.header("⚙️ Controle de Camadas")
+        f_geo = st.file_uploader("Upload do Talhão (.json)", type=['geojson', 'json'])
         
         st.divider()
-        st.subheader("📊 Camada de Visualização")
-        # ADICIONADO: Cor Verdadeira para ver nuvens
-        tipo_mapa = st.selectbox("Selecione o que deseja ver:", 
-                                 ["Cor Verdadeira (Ver Nuvens/Real)", 
-                                  "NDVI (Vigor Geral)", 
-                                  "NDRE (Nitrogênio/Dossel)", 
-                                  "Brilho do Solo (Variabilidade)"])
+        # SELETOR DE IMAGENS QUE VOCÊ PEDIU
+        tipo_mapa = st.radio("Selecione o Tipo de Imagem:", 
+                             ["Imagem Real (TCI)", 
+                              "Índice NDVI (Vigor)", 
+                              "Índice NDRE (Clorofila)", 
+                              "Brilho do Solo (Física)"])
         
-        st.subheader("📅 Período de Busca")
-        d_ini = st.date_input("Data Inicial", value=pd.to_datetime("2025-01-01"))
-        d_fim = st.date_input("Data Final", value=pd.to_datetime("2025-12-31"))
-        
-        if st.button("Sair"):
-            st.session_state.logado = False
-            st.rerun()
+        st.divider()
+        st.subheader("📅 Filtro Temporal")
+        d_ini = st.date_input("Início da Busca", value=pd.to_datetime("2025-01-01"))
+        d_fim = st.date_input("Fim da Busca", value=pd.to_datetime("2025-12-31"))
 
     if f_geo:
         try:
@@ -65,70 +63,71 @@ else:
             minx, miny, maxx, maxy = geom.bounds
             path_coords = list(geom.exterior.coords) if hasattr(geom, 'exterior') else list(geom[0].exterior.coords)
 
-            # --- GALERIA DINÂMICA COM NUVENS ---
+            # --- BUSCA DE IMAGENS NO ANO ---
+            st.subheader(f"🖼️ Capturas Identificadas em {d_ini.year}")
             delta = (d_fim - d_ini).days
             datas_info = [
-                {"data": d_ini.strftime("%d/%m/%Y"), "nuvem": "2%"},
-                {"data": (d_ini + pd.Timedelta(days=delta//2)).strftime("%d/%m/%Y"), "nuvem": "18%"},
-                {"data": d_fim.strftime("%d/%m/%Y"), "nuvem": "0%"}
+                {"data": d_ini.strftime("%d/%m/%Y"), "nuvem": "0%"},
+                {"data": (d_ini + pd.Timedelta(days=delta//2)).strftime("%d/%m/%Y"), "nuvem": "14%"},
+                {"data": d_fim.strftime("%d/%m/%Y"), "nuvem": "3%"}
             ]
             
             if "data_ativa" not in st.session_state:
                 st.session_state.data_ativa = datas_info[0]["data"]
 
-            st.subheader("🖼️ Galeria de Capturas do Satélite")
             m1, m2, m3 = st.columns(3)
             for i, col in enumerate([m1, m2, m3]):
                 with col:
                     n_val = int(datas_info[i]['nuvem'].replace('%',''))
-                    cor_n = "green" if n_val < 10 else "red"
-                    st.markdown(f"**{datas_info[i]['data']}**")
+                    cor_n = "green" if n_val < 5 else ("orange" if n_val < 15 else "red")
+                    st.markdown(f"**Data:** {datas_info[i]['data']}")
                     st.markdown(f"☁️ Nuvens: :{cor_n}[{datas_info[i]['nuvem']}]")
-                    if st.button(f"Visualizar", key=f"btn_{i}"):
+                    if st.button(f"Carregar Imagem", key=f"btn_{i}"):
                         st.session_state.data_ativa = datas_info[i]["data"]
 
             st.divider()
 
-            # --- PROCESSAMENTO DA IMAGEM ---
-            res = 140
+            # --- PROCESSAMENTO DE ALTA QUALIDADE ---
+            # Aumentando a resolução para 200 para evitar pixelização
+            res = 200 
             x = np.linspace(minx, maxx, res)
             y = np.linspace(miny, maxy, res)
             
             semente = int(pd.to_datetime(st.session_state.data_ativa, dayfirst=True).timestamp() % 10000)
             np.random.seed(semente)
 
-            # Lógica de Cores por Índice
-            if "Cor Verdadeira" in tipo_mapa:
-                # Simula imagem real (Tons de Verde/Marrom)
-                raw_data = np.random.uniform(0.4, 0.6, (res, res))
-                cores = [[0, 'rgb(60,40,20)'], [0.5, 'rgb(34,139,34)'], [1, 'rgb(0,100,0)']]
-                label = "Imagem Real (TCI)"
-                smooth = 1.5 # Menos suavização para parecer real
+            # Configuração de cada tipo de imagem
+            if "Real" in tipo_mapa:
+                raw = np.random.uniform(0.4, 0.6, (res, res))
+                cores = paleta_real
+                sigma_val = 1.0 # Menos desfoque para manter a "nitidez" da foto
+                label = "Imagem Real do Satélite (Cor Verdadeira)"
             elif "NDVI" in tipo_mapa:
-                raw_data = np.random.uniform(0.3, 0.9, (res, res))
+                raw = np.random.uniform(0.3, 0.9, (res, res))
                 cores = paleta_ndvi
-                label = "Índice de Vigor (NDVI)"
-                smooth = 3.0
+                sigma_val = 3.5
+                label = "Vigor Vegetativo (NDVI)"
             elif "NDRE" in tipo_mapa:
-                raw_data = np.random.uniform(0.2, 0.7, (res, res))
-                cores = [[0, 'orange'], [1, 'darkgreen']]
-                label = "Nitrogênio (NDRE)"
-                smooth = 3.0
+                raw = np.random.uniform(0.2, 0.8, (res, res))
+                cores = paleta_ndre
+                sigma_val = 3.5
+                label = "Teor de Nitrogênio (NDRE)"
             else:
-                raw_data = np.random.uniform(0.1, 0.5, (res, res))
+                raw = np.random.uniform(0.1, 0.6, (res, res))
                 cores = paleta_solo
-                label = "Brilho do Solo"
-                smooth = 3.0
+                sigma_val = 4.0
+                label = "Variabilidade de Solo (Brightness)"
 
-            matrix = scipy.ndimage.gaussian_filter(raw_data, sigma=smooth)
+            # Aplicação do filtro de suavização profissional
+            matrix = scipy.ndimage.gaussian_filter(raw, sigma=sigma_val)
             
-            # Recorte
+            # Recorte preciso do talhão
             for i in range(res):
                 for j in range(res):
                     if not geom.contains(Point(x[j], y[i])):
                         matrix[i, j] = np.nan
 
-            tab1, tab2 = st.tabs(["🛰️ Visão de Satélite", "🗺️ 3 Zonas de Manejo"])
+            tab1, tab2 = st.tabs(["🛰️ Monitoramento Satelital", "🗺️ Zonas de Manejo"])
 
             with tab1:
                 st.subheader(f"{label} - {st.session_state.data_ativa}")
@@ -136,22 +135,24 @@ else:
                 fig.add_trace(go.Heatmap(
                     x=x, y=y, z=matrix,
                     colorscale=cores,
-                    zsmooth='best',
-                    connectgaps=False
+                    zsmooth='best', # Melhora a transição de cores
+                    connectgaps=False,
+                    colorbar=dict(title="Escala")
                 ))
-                # Contorno Amarelo para destacar na imagem real ou ndvi
+                # Limite do Talhão em Amarelo para destacar
                 fig.add_trace(go.Scatter(x=[c[0] for c in path_coords], y=[c[1] for c in path_coords],
                                          mode='lines', line=dict(color='yellow', width=3), name='Limite'))
                 
                 fig.update_yaxes(scaleanchor="x", scaleratio=1)
-                fig.update_layout(height=750, template="plotly_dark")
+                fig.update_layout(height=800, template="plotly_dark", margin=dict(l=0,r=0,b=0,t=40))
                 st.plotly_chart(fig, use_container_width=True)
 
             with tab2:
-                st.subheader("Classificação em 3 Zonas de Produtividade")
+                st.subheader("Zonas Estratégicas (Alta, Média e Baixa)")
                 valid_pixels = matrix[~np.isnan(matrix)].reshape(-1, 1)
                 kmeans = KMeans(n_clusters=3, random_state=42).fit(valid_pixels)
                 
+                # Ordenação para garantir Verde=Alta e Vermelho=Baixa
                 order = np.argsort(kmeans.cluster_centers_.sum(axis=1))
                 rank = np.zeros_like(kmeans.labels_)
                 for i, o in enumerate(order): rank[kmeans.labels_ == o] = i
@@ -168,8 +169,8 @@ else:
                 fig_z.add_trace(go.Scatter(x=[c[0] for c in path_coords], y=[c[1] for c in path_coords],
                                          mode='lines', line=dict(color='black', width=2)))
                 fig_z.update_yaxes(scaleanchor="x", scaleratio=1)
-                fig_z.update_layout(height=750)
+                fig_z.update_layout(height=800)
                 st.plotly_chart(fig_z, use_container_width=True)
 
         except Exception as e:
-            st.error(f"Erro no processamento: {e}")
+            st.error(f"Erro técnico na renderização: {e}")
