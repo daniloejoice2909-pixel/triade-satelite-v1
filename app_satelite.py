@@ -1,5 +1,5 @@
 import streamlit as st
-import pd
+import pandas as pd  # <--- Corrigido aqui
 import numpy as np
 import json
 import os
@@ -13,9 +13,9 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
 # --- 1. CONFIGURAÇÃO DE ALTA FIDELIDADE ---
-st.set_page_config(layout="wide", page_title="Tríade Satélite Pro v7.1")
+st.set_page_config(layout="wide", page_title="Tríade Satélite Pro v7.2")
 
-# Paleta Profissional (7 Níveis de Vigor)
+# Paleta Profissional FieldView (7 Níveis de Vigor)
 fieldview_colors = ['#a50026', '#d73027', '#f46d43', '#fee08b', '#d9ef8b', '#66bd63', '#1a9850']
 
 if "logado" not in st.session_state:
@@ -66,7 +66,7 @@ else:
             st.session_state.lista_fotos = [
                 {"data": d_fim.strftime("%d/%m/%Y"), "nuvem": "0%"},
                 {"data": (d_ini + pd.Timedelta(days=delta//2)).strftime("%d/%m/%Y"), "nuvem": "10%"},
-                {"data": d_ini.strftime("%d/%m/%Y"), "nuvem": "2%"}
+                {"data": d_ini.strftime("%d/%m/%Y"), "nuvem": "5%"}
             ]
 
     # --- 4. ÁREA PRINCIPAL ---
@@ -81,19 +81,17 @@ else:
 
         if st.session_state.data_ativa:
             try:
-                # 4.1 Geometria e Área (CORREÇÃO DA SINTAXE)
                 geojson_data = json.load(f_geo)
                 geom_data = geojson_data['features'][0] if 'features' in geojson_data else geojson_data
                 geom = shape(geom_data['geometry'])
                 centroid = [geom.centroid.y, geom.centroid.x]
                 minx, miny, maxx, maxy = geom.bounds
 
-                # Cálculo de Hectares Estimados (Fórmula Corrigida)
-                # Área em m² aproximada pela latitude
+                # Cálculo de Área
                 area_m2 = geom.area * (111139**2) * np.cos(np.radians(geom.centroid.y))
                 area_total_ha = round(abs(area_m2) / 10000, 2)
 
-                # 4.2 Motor de Vetorização
+                # Motor de Vetorização
                 res = 200
                 x, y = np.linspace(minx, maxx, res), np.linspace(miny, maxy, res)
                 X, Y = np.meshgrid(x, y)
@@ -102,7 +100,6 @@ else:
                 raw = np.random.uniform(0.3, 0.9, (res, res))
                 matrix = scipy.ndimage.gaussian_filter(raw, sigma=suavidade)
                 
-                # Normalização e Inversão
                 v_min, v_max = np.nanpercentile(matrix, [5, 95])
                 matrix = np.clip((matrix - v_min) / (v_max - v_min), 0, 1)
 
